@@ -5,6 +5,14 @@ import { Err, Ok, Result } from "@zondax/ts-results"
 import { PointTransaction, Wallet } from "./model"
 import { BadRequestError, ClientError, NotFoundError } from "./problem"
 
+/*
+ * データベースの操作を行う関数を定義します。
+ *
+ */
+
+/**
+ * ウォレットを作成します。
+ */
 export async function createWallet(): Promise<number> {
     const { id } = await db.insertInto("wallets")
         .values({
@@ -15,6 +23,9 @@ export async function createWallet(): Promise<number> {
     return id
 }
 
+/**
+ * ウォレットとポイントの履歴を取得します。
+ */
 export async function findWalletById(id: number): Promise<Result<Wallet, ClientError>> {
     const walletResult = await db.selectFrom("wallets")
         .where("id", "=", id)
@@ -45,6 +56,12 @@ export async function findWalletById(id: number): Promise<Result<Wallet, ClientE
     }))
 }
 
+/**
+ * ウォレットにポイントを付与します。
+ * 
+ * @param wallet_id ウォレットのID
+ * @param point 付与ポイント
+ */
 export async function aquirePoints(wallet_id: number, point: number): Promise<Result<string, ClientError>> {
     return await db.transaction().execute(async (trx) => {
         const { balance } = await trx.selectFrom("wallets")
@@ -86,6 +103,12 @@ export async function aquirePoints(wallet_id: number, point: number): Promise<Re
     })    
 }
 
+/**
+ * ウォレットのポイントを使用します。
+ * 
+ * @param wallet_id ウォレットのID
+ * @param point 使用ポイント
+ */
 export async function consumePoints(wallet_id: number, point: number): Promise<Result<string, ClientError>> {
     return await db.transaction().execute(async (trx) => {
         const { balance } = await trx.selectFrom("wallets")
@@ -149,6 +172,9 @@ export async function consumePoints(wallet_id: number, point: number): Promise<R
     })
 }
 
+/**
+ * ウォレットのポイントの消費対象を取得します。 
+ */
 async function findConsumptionTargets(trx: Transaction<Database>, wallet_id: number) {
     return await trx.selectFrom("aquisitions as a")
         .innerJoin("entries as ae", "ae.id", "a.aquisition_entry_id")

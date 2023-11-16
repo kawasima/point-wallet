@@ -1,3 +1,7 @@
+/*
+ * クライアントに返すエラーを表現する型と、それを返す関数を定義します。
+ */
+
 export interface ClientError extends Error {
     status: number;
 }

@@ -12,7 +12,7 @@ class MyMigrationProvider implements MigrationProvider {
     }
 }
 /**
- * Initialize Database Schema
+ * スキーマ初期化のエンドポイントです
  * 
  * @param req HTTP Request
  * @returns Nothing

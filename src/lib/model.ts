@@ -1,5 +1,8 @@
-import { type } from "os"
 import z from "zod"
+
+/*
+ * ドメインモデルの定義です。
+ */
 
 export const WalletId = z.number().positive()
 export const Point = z.number().positive()

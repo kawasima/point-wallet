@@ -3,6 +3,10 @@ import { problemResponse } from "@/lib/problem"
 import { aquirePoints, consumePoints, findWalletById } from "@/lib/repository"
 import z from "zod"
 
+/**
+ * ウォレットの情報を取得します。
+ * ポイントのやり取りの履歴の最新の10件も同時に返します。
+ */
 export async function GET(req: Request, { params }: { params: { id: string }}) {
     const walletId = z.preprocess(v => Number(v), WalletId)
         .parse(params.id)
@@ -18,6 +22,9 @@ const PointTransactionRequest = z.object({
     point: Point,
 })
 
+/**
+ * ポイントのやり取りを行います。
+ */
 export async function PUT(req: Request, { params }: { params: { id: string }}) {
     const walletId = z.preprocess(v => Number(v), WalletId)
         .parse(params.id)
