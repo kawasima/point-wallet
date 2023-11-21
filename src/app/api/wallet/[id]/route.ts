@@ -1,18 +1,33 @@
-import { Point, WalletId } from "@/lib/model"
-import { problemResponse } from "@/lib/problem"
-import { aquirePoints, consumePoints, findWalletById } from "@/lib/repository"
+import { Point, PointCloseToExpiry, WalletId } from "@/lib/model"
+import { BadRequestError, ClientError, problemResponse } from "@/lib/problem"
+import { aquirePoints, consumePoints, findPointsCloseToExpiry, findWalletById } from "@/lib/repository"
+import { Result } from "@zondax/ts-results"
 import z from "zod"
 
 /**
  * ウォレットの情報を取得します。
  * ポイントのやり取りの履歴の最新の10件も同時に返します。
  */
-export async function GET(req: Request, { params }: { params: { id: string }}) {
-    const walletId = z.preprocess(v => Number(v), WalletId)
-        .parse(params.id)
-    const wallet = await findWalletById(walletId)
+export async function GET(req: Request, { params }: {
+    params: { id: string },
+}) {
+    const walletId = WalletId.safeParse(params.id)
+    if (!walletId.success) {
+        return problemResponse(new BadRequestError(walletId.error.message))
+    }
+    const wallet = await findWalletById(walletId.data)
+    let pointsCloseToExpiry: Result<PointCloseToExpiry[], ClientError>
+    const { searchParams } = new URL(req.url)
+    if (searchParams.get("with")?.includes("pointsCloseToExpiry")) {
+        pointsCloseToExpiry = await findPointsCloseToExpiry(walletId.data)
+    }
     return wallet
-        .map(wallet => Response.json(wallet))
+        .map(wallet => {
+            if (pointsCloseToExpiry?.ok) {
+                wallet.pointsCloseToExpiry = pointsCloseToExpiry.val
+            }
+            return Response.json(wallet)
+        })
         .mapErr(err => problemResponse(err))
         .val
 }

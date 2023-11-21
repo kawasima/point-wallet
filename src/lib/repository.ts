@@ -2,7 +2,7 @@ import { Transaction } from "kysely"
 import { db } from "./database"
 import { Database } from "./types"
 import { Err, Ok, Result } from "@zondax/ts-results"
-import { PointTransaction, Wallet } from "./model"
+import { Point, PointCloseToExpiry, PointTransaction, Wallet, WalletId } from "./model"
 import { BadRequestError, ClientError, NotFoundError } from "./problem"
 
 /*
@@ -13,7 +13,7 @@ import { BadRequestError, ClientError, NotFoundError } from "./problem"
 /**
  * ウォレットを作成します。
  */
-export async function createWallet(): Promise<number> {
+export async function createWallet(): Promise<WalletId> {
     const { id } = await db.insertInto("wallets")
         .values({
             balance: 0,
@@ -26,7 +26,7 @@ export async function createWallet(): Promise<number> {
 /**
  * ウォレットとポイントの履歴を取得します。
  */
-export async function findWalletById(id: number): Promise<Result<Wallet, ClientError>> {
+export async function findWalletById(id: WalletId): Promise<Result<Wallet, ClientError>> {
     const walletResult = await db.selectFrom("wallets")
         .where("id", "=", id)
         .selectAll()
@@ -59,14 +59,14 @@ export async function findWalletById(id: number): Promise<Result<Wallet, ClientE
 /**
  * ウォレットにポイントを付与します。
  * 
- * @param wallet_id ウォレットのID
+ * @param walletId ウォレットのID
  * @param point 付与ポイント
  */
-export async function aquirePoints(wallet_id: number, point: number): Promise<Result<string, ClientError>> {
+export async function aquirePoints(walletId: WalletId, point: Point): Promise<Result<string, ClientError>> {
     return await db.transaction().execute(async (trx) => {
         const { balance } = await trx.selectFrom("wallets")
             .select("balance")
-            .where("id", "=", wallet_id)
+            .where("id", "=", walletId)
             //.forUpdate()
             .executeTakeFirstOrThrow()
 
@@ -77,7 +77,7 @@ export async function aquirePoints(wallet_id: number, point: number): Promise<Re
         const [{ id: credit_entry_id }, { id: debit_entry_id }] = await trx.insertInto("entries").values([
             {
                 transaction_id: id,
-                wallet_id,
+                wallet_id: walletId,
                 account: "credit",
                 amount: point,
             },
@@ -97,7 +97,7 @@ export async function aquirePoints(wallet_id: number, point: number): Promise<Re
         await trx.updateTable("wallets").set({
             balance: balance + point,
         })
-        .where("id", "=", wallet_id)
+        .where("id", "=", walletId)
         .execute()
         return Ok("")
     })    
@@ -106,22 +106,25 @@ export async function aquirePoints(wallet_id: number, point: number): Promise<Re
 /**
  * ウォレットのポイントを使用します。
  * 
- * @param wallet_id ウォレットのID
+ * @param walletId ウォレットのID
  * @param point 使用ポイント
  */
-export async function consumePoints(wallet_id: number, point: number): Promise<Result<string, ClientError>> {
+export async function consumePoints(
+    walletId: WalletId,
+    point: Point
+): Promise<Result<string, ClientError>> {
     return await db.transaction().execute(async (trx) => {
         const { balance } = await trx.selectFrom("wallets")
             .select("balance")
-            .where("id", "=", wallet_id)
+            .where("id", "=", walletId)
             //.forUpdate()
             .executeTakeFirstOrThrow()
         
-        if (balance <= point) {
+        if (balance < point) {
             return new Err(new BadRequestError("insufficient balance"))
         }
 
-        const aquisitionEntries = await findConsumptionTargets(trx, wallet_id)
+        const aquisitionEntries = await findConsumptionTargets(trx, walletId)
 
         let remainingPoint = point
         const consumptionEntries = []
@@ -151,7 +154,7 @@ export async function consumePoints(wallet_id: number, point: number): Promise<R
                 },
                 {
                     transaction_id: id,
-                    wallet_id,
+                    wallet_id: walletId,
                     account: "debit",
                     amount: entry.amount,
                 }
@@ -166,10 +169,36 @@ export async function consumePoints(wallet_id: number, point: number): Promise<R
         await trx.updateTable("wallets").set({
                 balance: balance - point,
             })
-            .where("id", "=", wallet_id)
+            .where("id", "=", walletId)
             .execute()
         return Ok("")
     })
+}
+
+/**
+ * 有効期限が近いポイントを取得する。
+ */
+export async function findPointsCloseToExpiry(
+    walletId: WalletId
+): Promise<Result<PointCloseToExpiry[], ClientError>> {
+    return Ok(await db.selectFrom("aquisitions as a")
+        .innerJoin("entries as ae", "ae.id", "a.aquisition_entry_id")
+        .innerJoin("transactions as t", "t.id", "ae.transaction_id")
+        .leftJoin("consumptions as c", "a.aquisition_entry_id", "c.aquisition_entry_id")
+        .leftJoin("entries as ce", "ce.id", "c.consumption_entry_id")
+        .where("ae.wallet_id", "=", walletId)
+        .where("a.expires_on", ">=", new Date().toISOString())
+        .orderBy("a.expires_on", "asc")
+        .groupBy("a.aquisition_entry_id")
+        .select(["a.aquisition_entry_id", "a.expires_on", "ae.amount as aquired_amount",
+            (eb) => eb.fn("sum", ["ce.amount"]).as("consumed_amount")])
+        .execute()
+        .then(rows => rows.filter(row => row.aquired_amount > Number(row.consumed_amount))
+        .map(row => PointCloseToExpiry.parse({
+            expiresOn: row.expires_on,
+            amount: row.aquired_amount - Number(row.consumed_amount),
+        }))))
+
 }
 
 /**

@@ -11,6 +11,22 @@ class MyMigrationProvider implements MigrationProvider {
     return migrations
     }
 }
+
+/**
+ * スキーマ初期化されているかを確認します
+ */
+export async function GET(req: Request) {
+    try {
+        const count = await db.selectFrom("wallets")
+            .select(({ fn }) => [
+                fn.countAll().as("count")
+            ]).execute()
+        return Response.json({ initialized: true })
+    } catch (e) {
+        return Response.json({ initialized: false })
+    }
+}
+
 /**
  * スキーマ初期化のエンドポイントです
  * 
